@@ -130,3 +130,160 @@ func TestClientLoginFlow(t *testing.T) {
 		t.Errorf("expected ProductClass 'FAST5598' after fetchHomeMetadata, got '%s'", c.ProductClass)
 	}
 }
+
+func TestDHCPClientOperations(t *testing.T) {
+	// Keep track of our virtual clients list
+	clients := []DHCPClient{
+		{
+			ID:         1,
+			Hostname:   "shaw",
+			IPAddress:  "192.168.1.6",
+			MACAddress: "02:00:00:00:00:01",
+			Enabled:    true,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			if r.URL.Path == "/api/v1/dhcp/clients" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				wrapper := []DHCPClientsWrapper{}
+				w1 := DHCPClientsWrapper{}
+				w1.DHCP.Clients = clients
+				wrapper = append(wrapper, w1)
+				_ = json.NewEncoder(w).Encode(wrapper)
+				return
+			}
+		case "POST":
+			if r.URL.Path == "/api/v1/dhcp/clients" {
+				_ = r.ParseForm()
+				enabled := r.Form.Get("enable") == "1"
+				hostname := r.Form.Get("hostname")
+				mac := r.Form.Get("macaddress")
+				ip := r.Form.Get("ipaddress")
+
+				newClient := DHCPClient{
+					ID:         2,
+					Hostname:   hostname,
+					IPAddress:  ip,
+					MACAddress: mac,
+					Enabled:    enabled,
+				}
+				clients = append(clients, newClient)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		case "PUT":
+			if r.URL.Path == "/api/v1/dhcp/clients/2" {
+				_ = r.ParseForm()
+				for idx, val := range clients {
+					if val.ID == 2 {
+						if r.Form.Get("enable") != "" {
+							clients[idx].Enabled = r.Form.Get("enable") == "1"
+						}
+						if r.Form.Get("hostname") != "" {
+							clients[idx].Hostname = r.Form.Get("hostname")
+						}
+						if r.Form.Get("macaddress") != "" {
+							clients[idx].MACAddress = r.Form.Get("macaddress")
+						}
+						if r.Form.Get("ipaddress") != "" {
+							clients[idx].IPAddress = r.Form.Get("ipaddress")
+						}
+					}
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		case "DELETE":
+			if r.URL.Path == "/api/v1/dhcp/clients/2" {
+				// Remove the second client from list
+				var updated []DHCPClient
+				for _, c := range clients {
+					if c.ID != 2 {
+						updated = append(updated, c)
+					}
+				}
+				clients = updated
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	c, err := NewClient(server.URL, "admin", "some_secure_password")
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Test GET clients
+	list, err := c.GetDHCPReservedAddresses(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPReservedAddresses failed: %v", err)
+	}
+	if len(list) != 1 || list[0].Hostname != "shaw" {
+		t.Errorf("Unexpected clients list: %+v", list)
+	}
+
+	// 2. Test POST client
+	newC, err := c.AddDHCPReservedAddress(ctx, "calloway", "02:00:00:00:00:04", "192.168.1.5", true)
+	if err != nil {
+		t.Fatalf("AddDHCPReservedAddress failed: %v", err)
+	}
+	if newC.ID != 2 || newC.Hostname != "calloway" {
+		t.Errorf("Unexpected created client: %+v", newC)
+	}
+
+	// Verify it was added to the list
+	list, err = c.GetDHCPReservedAddresses(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPReservedAddresses failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Errorf("Expected 2 clients after addition, got %d", len(list))
+	}
+
+	// Test PUT update
+	hostnameVal := "new-calloway"
+	macVal := "02:00:00:00:00:04"
+	ipVal := "192.168.1.19"
+	enabledVal := true
+	err = c.UpdateDHCPReservedAddress(ctx, 2, &hostnameVal, &macVal, &ipVal, &enabledVal)
+	if err != nil {
+		t.Fatalf("UpdateDHCPReservedAddress failed: %v", err)
+	}
+
+	// Verify update was applied
+	list, err = c.GetDHCPReservedAddresses(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPReservedAddresses failed: %v", err)
+	}
+	for _, cl := range list {
+		if cl.ID == 2 {
+			if cl.Hostname != "new-calloway" || cl.IPAddress != "192.168.1.19" {
+				t.Errorf("Unexpected updated client fields: %+v", cl)
+			}
+		}
+	}
+
+	// 3. Test DELETE client
+	err = c.DeleteDHCPReservedAddress(ctx, 2)
+	if err != nil {
+		t.Fatalf("DeleteDHCPReservedAddress failed: %v", err)
+	}
+
+	// Verify it was removed from the list
+	list, err = c.GetDHCPReservedAddresses(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPReservedAddresses failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("Expected 1 client after deletion, got %d", len(list))
+	}
+}

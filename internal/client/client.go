@@ -291,3 +291,163 @@ func (c *Client) AuthenticatedPost(ctx context.Context, path string, data url.Va
 
 	return io.ReadAll(resp.Body)
 }
+
+// AuthenticatedPut executes a urlencoded PUT request using session cookies.
+func (c *Client) AuthenticatedPut(ctx context.Context, path string, data url.Values) ([]byte, error) {
+	reqURL := fmt.Sprintf("%s/%s", c.BaseURL, strings.TrimPrefix(path, "/"))
+	req, err := http.NewRequestWithContext(ctx, "PUT", reqURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("PUT %s returned status %d", path, resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// AuthenticatedDelete executes a DELETE request using session cookies.
+func (c *Client) AuthenticatedDelete(ctx context.Context, path string) ([]byte, error) {
+	reqURL := fmt.Sprintf("%s/%s", c.BaseURL, strings.TrimPrefix(path, "/"))
+	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("DELETE %s returned status %d", path, resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// DHCPClient represents a reserved address on the router.
+type DHCPClient struct {
+	ID         int    `json:"id"`
+	Hostname   string `json:"hostname"`
+	IPAddress  string `json:"ipaddress"`
+	MACAddress string `json:"macaddress"`
+	Enabled    bool   `json:"enable"`
+}
+
+type DHCPClientsWrapper struct {
+	DHCP struct {
+		Clients []DHCPClient `json:"clients"`
+	} `json:"dhcp"`
+}
+
+// GetDHCPReservedAddresses retrieves all reserved DHCP leases.
+func (c *Client) GetDHCPReservedAddresses(ctx context.Context) ([]DHCPClient, error) {
+	body, err := c.AuthenticatedGet(ctx, "/api/v1/dhcp/clients")
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []DHCPClientsWrapper
+	if err := json.Unmarshal(body, &wrappers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal DHCP clients: %w", err)
+	}
+
+	if len(wrappers) > 0 {
+		return wrappers[0].DHCP.Clients, nil
+	}
+
+	return []DHCPClient{}, nil
+}
+
+// AddDHCPReservedAddress creates a new DHCP reservation on the router.
+// Returns the newly created DHCPClient with its assigned ID.
+func (c *Client) AddDHCPReservedAddress(ctx context.Context, hostname, macaddress, ipaddress string, enabled bool) (*DHCPClient, error) {
+	form := url.Values{}
+	enableVal := "0"
+	if enabled {
+		enableVal = "1"
+	}
+	form.Set("enable", enableVal)
+	form.Set("hostname", hostname)
+	form.Set("macaddress", macaddress)
+	form.Set("ipaddress", ipaddress)
+
+	_, err := c.AuthenticatedPost(ctx, "/api/v1/dhcp/clients", form)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add DHCP reserved address: %w", err)
+	}
+
+	// Since the POST response does not return the new ID, we query the list
+	// of clients and find the one that matches our MAC address to discover the ID.
+	clients, err := c.GetDHCPReservedAddresses(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query DHCP clients after creation: %w", err)
+	}
+
+	// Search by MAC address (case-insensitive)
+	targetMAC := strings.ToLower(macaddress)
+	for _, client := range clients {
+		if strings.ToLower(client.MACAddress) == targetMAC {
+			return &client, nil
+		}
+	}
+
+	return nil, fmt.Errorf("DHCP reservation was created, but could not be located in the clients list afterwards")
+}
+
+// DeleteDHCPReservedAddress deletes a DHCP reservation by ID.
+func (c *Client) DeleteDHCPReservedAddress(ctx context.Context, id int) error {
+	path := fmt.Sprintf("/api/v1/dhcp/clients/%d", id)
+	_, err := c.AuthenticatedDelete(ctx, path)
+	if err != nil {
+		return fmt.Errorf("failed to delete DHCP reserved address %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateDHCPReservedAddress updates an existing DHCP reservation.
+// It accepts optional pointers for hostname, macaddress, ipaddress, and enabled.
+// Only non-nil fields will be sent in the PUT request.
+func (c *Client) UpdateDHCPReservedAddress(
+	ctx context.Context,
+	id int,
+	hostname *string,
+	macaddress *string,
+	ipaddress *string,
+	enabled *bool,
+) error {
+	form := url.Values{}
+	if enabled != nil {
+		enableVal := "0"
+		if *enabled {
+			enableVal = "1"
+		}
+		form.Set("enable", enableVal)
+	}
+	if hostname != nil {
+		form.Set("hostname", *hostname)
+	}
+	if macaddress != nil {
+		form.Set("macaddress", *macaddress)
+	}
+	if ipaddress != nil {
+		form.Set("ipaddress", *ipaddress)
+	}
+
+	path := fmt.Sprintf("/api/v1/dhcp/clients/%d", id)
+	_, err := c.AuthenticatedPut(ctx, path, form)
+	if err != nil {
+		return fmt.Errorf("failed to update DHCP reserved address %d: %w", id, err)
+	}
+	return nil
+}

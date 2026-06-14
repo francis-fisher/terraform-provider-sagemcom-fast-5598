@@ -1,10 +1,4 @@
-terraform {
-  required_providers {
-    sagemcom-fast-5598 = {
-      source = "registry.terraform.io/francis-fisher/sagemcom-fast-5598"
-    }
-  }
-}
-
-provider "sagemcom-fast-5598" {
+provider "sagemcom" {
+  endpoint = "192.168.1.1"
+  password = "your-router-admin-password"
 }
