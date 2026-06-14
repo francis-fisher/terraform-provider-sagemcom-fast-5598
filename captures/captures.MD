@@ -1,0 +1,1 @@
+This folder contains sanitised HAR transcripts of various interactions with the router's web interface. These were captured with Firefox from the developer tools network tab. To ensure full and untruncated captures, the "Disable Cache" checkbox was checked, and the firefox setting devtools.netmonitor.responseBodyLimit was increased form 1MB to 10MB.
