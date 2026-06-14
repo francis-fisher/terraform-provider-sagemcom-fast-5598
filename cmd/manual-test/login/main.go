@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hashicorp/terraform-provider-scaffolding-framework/internal/client"
+	"github.com/francis-fisher/terraform-provider-sagemcom-fast-5598/internal/client"
 )
 
 func main() {

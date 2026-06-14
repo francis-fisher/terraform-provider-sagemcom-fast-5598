@@ -1,4 +1,4 @@
-module github.com/hashicorp/terraform-provider-scaffolding-framework
+module github.com/francis-fisher/terraform-provider-sagemcom-fast-5598
 
 go 1.25.8
 
