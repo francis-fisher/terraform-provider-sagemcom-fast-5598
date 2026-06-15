@@ -69,14 +69,13 @@ func NewClient(baseURL, username, password string) (*Client, error) {
 	}, nil
 }
 
-// Computes the SHA-512 hex digest of a string.
 func sha512Hex(s string) string {
 	h := sha512.New()
 	h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Generates a random 19-digit decimal string.
+// Generates a random 19-digit decimal string which is used in the authentication flow.
 func generateCnonce() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	// A 19-digit number starts from 1000000000000000000 up to 9999999999999999999.
@@ -448,6 +447,138 @@ func (c *Client) UpdateDHCPReservedAddress(
 	_, err := c.AuthenticatedPut(ctx, path, form)
 	if err != nil {
 		return fmt.Errorf("failed to update DHCP reserved address %d: %w", id, err)
+	}
+	return nil
+}
+
+// PortForward represents a port forwarding / NAT rule on the router.
+type PortForward struct {
+	ID              int    `json:"id"`
+	Enabled         bool   `json:"enable"`
+	Description     string `json:"description"`
+	ExternalIP      string `json:"externalIP"`
+	ExternalPort    int    `json:"externalPort"`
+	ExternalEndPort int    `json:"externalEndPort"`
+	InternalPort    int    `json:"internalPort"`
+	InternalIP      string `json:"internalIP"`
+	Service         string `json:"service"`
+	Protocol        string `json:"protocol"`
+}
+
+type NATRulesWrapper struct {
+	NAT struct {
+		Enabled bool          `json:"enable"`
+		Rules   []PortForward `json:"rules"`
+	} `json:"nat"`
+}
+
+// GetPortForwards retrieves all port forwarding rules.
+func (c *Client) GetPortForwards(ctx context.Context) ([]PortForward, error) {
+	body, err := c.AuthenticatedGet(ctx, "/api/v1/nat/rules")
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []NATRulesWrapper
+	if err := json.Unmarshal(body, &wrappers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal NAT rules: %w", err)
+	}
+
+	if len(wrappers) > 0 {
+		return wrappers[0].NAT.Rules, nil
+	}
+
+	return []PortForward{}, nil
+}
+
+// AddPortForward creates a new port forwarding rule.
+// Returns the newly created PortForward with its assigned ID.
+func (c *Client) AddPortForward(ctx context.Context, description string, localIP string, remoteIP string, externalPort, internalPort, externalEndPort int, protocol string, enabled bool) (*PortForward, error) {
+	form := url.Values{}
+	enableVal := "0"
+	if enabled {
+		enableVal = "1"
+	}
+	form.Set("enable", enableVal)
+	form.Set("description", description)
+	form.Set("service", "OTHER")
+	form.Set("protocol", protocol)
+	form.Set("ipaddress", localIP)
+	if remoteIP != "" && remoteIP != "*" {
+		form.Set("ipremote", remoteIP)
+	}
+	form.Set("externalPort", fmt.Sprintf("%d", externalPort))
+	form.Set("internalPort", fmt.Sprintf("%d", internalPort))
+	form.Set("externalEndPort", fmt.Sprintf("%d", externalEndPort))
+
+	_, err := c.AuthenticatedPost(ctx, "/api/v1/nat/rules", form)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add port forward rule: %w", err)
+	}
+
+	// Since POST returns 204 without the new ID, we query the list
+	// of rules and find the one that matches our parameters.
+	rules, err := c.GetPortForwards(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NAT rules after creation: %w", err)
+	}
+
+	for _, rule := range rules {
+		if rule.Description == description &&
+			rule.InternalIP == localIP &&
+			rule.ExternalPort == externalPort &&
+			rule.Protocol == protocol &&
+			(rule.ExternalIP == remoteIP || (remoteIP == "" && rule.ExternalIP == "") || (remoteIP == "*" && rule.ExternalIP == "")) {
+			return &rule, nil
+		}
+	}
+
+	return nil, fmt.Errorf("port forward rule was created, but could not be located in the rules list afterwards")
+}
+
+// DeletePortForward deletes a port forwarding rule by ID.
+func (c *Client) DeletePortForward(ctx context.Context, id int) error {
+	path := fmt.Sprintf("/api/v1/nat/rules/%d", id)
+	_, err := c.AuthenticatedDelete(ctx, path)
+	if err != nil {
+		return fmt.Errorf("failed to delete port forward rule %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdatePortForward updates an existing port forwarding rule.
+func (c *Client) UpdatePortForward(
+	ctx context.Context,
+	id int,
+	description string,
+	localIP string,
+	remoteIP string,
+	externalPort, internalPort, externalEndPort int,
+	protocol string,
+	enabled bool,
+) error {
+	form := url.Values{}
+	enableVal := "0"
+	if enabled {
+		enableVal = "1"
+	}
+	form.Set("enable", enableVal)
+	form.Set("description", description)
+	form.Set("ipaddress", localIP)
+	if remoteIP == "" || remoteIP == "*" {
+		form.Set("ipremote", "*")
+	} else {
+		form.Set("ipremote", remoteIP)
+	}
+	form.Set("externalPort", fmt.Sprintf("%d", externalPort))
+	form.Set("internalPort", fmt.Sprintf("%d", internalPort))
+	form.Set("externalEndPort", fmt.Sprintf("%d", externalEndPort))
+	form.Set("protocol", protocol)
+
+	path := fmt.Sprintf("/api/v1/nat/rules/%d", id)
+	_, err := c.AuthenticatedPut(ctx, path, form)
+	if err != nil {
+		return fmt.Errorf("failed to update port forward rule %d: %w", id, err)
 	}
 	return nil
 }

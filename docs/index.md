@@ -12,14 +12,6 @@ The Sagemcom F@st router provider uses the router's backend REST API to configur
 ## Example Usage
 
 ```terraform
-terraform {
-  required_providers {
-    sagemcom = {
-      source = "francis-fisher/sagemcom"
-    }
-  }
-}
-
 provider "sagemcom" {
   endpoint = "192.168.1.1"
   password = "your-router-admin-password"

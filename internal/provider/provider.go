@@ -109,6 +109,7 @@ func (p *SagemcomProvider) Configure(ctx context.Context, req provider.Configure
 func (p *SagemcomProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewDHCPReservedAddressResource,
+		NewPortForwardResource,
 	}
 }
 

@@ -169,3 +169,81 @@ All requests are served over HTTP.
 ### 3. GET `/api/v1/wan/ipv4`
 * **Authentication**: Required (`conid` session cookie)
 * **Description**: Returns detailed IPv4 network settings for the WAN uplink interface (addressing type, WAN mode, gateway, MAC, uptime, status, MTU, etc.).
+
+---
+
+## NAT & Port Forwarding
+
+### 1. GET `/api/v1/nat/rules`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Lists all currently configured IPv4 port forwarding / NAT rules.
+* **Response Body (JSON)**:
+  ```json
+  [
+    {
+      "nat": {
+        "enable": true,
+        "rules": [
+          {
+            "id": 1,
+            "enable": true,
+            "description": "ssh",
+            "externalIP": "",
+            "externalPort": 22,
+            "externalEndPort": 0,
+            "internalPort": 22,
+            "internalIP": "192.168.1.10",
+            "service": "OTHER",
+            "protocol": "tcp"
+          }
+        ]
+      }
+    }
+  ]
+  ```
+
+### 2. POST `/api/v1/nat/rules`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Creates a new port forwarding rule.
+* **Request Body** (`application/x-www-form-urlencoded`):
+  ```
+  enable=1&description=ssh&service=OTHER&protocol=tcp&ipremote=*&ipaddress=192.168.1.10&externalPort=2222&internalPort=22&externalEndPort=0
+  ```
+  * `enable`: `1` (enabled) or `0` (disabled).
+  * `description`: Descriptive name or label.
+  * `service`: Typically defaulted to `OTHER`.
+  * `protocol`: The transport or network protocol. Supported protocol API values (and their corresponding UI labels) are:
+    * `all` (UI Label: `TCP - UDP`)
+    * `tcp` (UI Label: `TCP`)
+    * `udp` (UI Label: `UDP`)
+    * `both` (UI Label: `BOTH`)
+    * `icmp` (UI Label: `ICMP`)
+    * `gre` (UI Label: `GRE`)
+    * `ah` (UI Label: `AH`)
+    * `esp` (UI Label: `ESP`)
+    * `other` (UI Label: `Other`)
+  * `ipremote`: External IP address allowed to access (or `*` to allow any IP address). Maps to `externalIP` in GET responses.
+  * `ipaddress`: Local IP address of the target machine on the LAN. Maps to `internalIP` in GET responses.
+  * `externalPort`: Starting external port number.
+  * `internalPort`: Local port number.
+  * `externalEndPort`: Ending external port number (set to `0` if forwarding a single port, or a higher number to forward a range of ports).
+* **Response Status**: `204 No Content` (Does not return the newly assigned `id`. The client must list all rules afterward and filter by matching attributes like description, IP address, external port, and protocol to discover the rule's `id`).
+
+### 3. PUT `/api/v1/nat/rules/{id}`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Modifies an existing port forwarding rule.
+* **Request Body** (`application/x-www-form-urlencoded`):
+  ```
+  enable=1&description=ssh-updated&protocol=tcp&ipaddress=192.168.1.10&externalPort=22&internalPort=22&externalEndPort=0&ipremote=198.51.100.1
+  ```
+  * `ipremote`: Set to `*` to allow traffic from any external remote source IP, or a specific IP address to restrict access.
+* **Response Status**:
+  * `204 No Content`: Successful update.
+  * `400 Bad Request`: May occur under certain conditions or when changing critical ports or protocols depending on connection/firmware state. To avoid bad requests, it is recommended to delete and recreate rules if key routing attributes (IP address, ports, protocol) are changed.
+
+### 4. DELETE `/api/v1/nat/rules/{id}`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Deletes a port forwarding rule by its assigned ID.
+* **Response Status**: `204 No Content`
+
+

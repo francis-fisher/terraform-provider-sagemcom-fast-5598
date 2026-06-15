@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -285,5 +286,179 @@ func TestDHCPClientOperations(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Errorf("Expected 1 client after deletion, got %d", len(list))
+	}
+}
+
+func TestNATOperations(t *testing.T) {
+	rules := []PortForward{
+		{
+			ID:              59,
+			Enabled:         true,
+			Description:     "bastion 2222",
+			ExternalIP:      "",
+			ExternalPort:    2222,
+			ExternalEndPort: 0,
+			InternalPort:    2222,
+			InternalIP:      "198.51.100.1",
+			Service:         "OTHER",
+			Protocol:        "tcp",
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			if r.URL.Path == "/api/v1/nat/rules" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				wrapper := []NATRulesWrapper{}
+				w1 := NATRulesWrapper{}
+				w1.NAT.Enabled = true
+				w1.NAT.Rules = rules
+				wrapper = append(wrapper, w1)
+				_ = json.NewEncoder(w).Encode(wrapper)
+				return
+			}
+		case "POST":
+			if r.URL.Path == "/api/v1/nat/rules" {
+				_ = r.ParseForm()
+				enabled := r.Form.Get("enable") == "1"
+				description := r.Form.Get("description")
+				protocol := r.Form.Get("protocol")
+				ip := r.Form.Get("ipaddress")
+				extPort, _ := strconv.Atoi(r.Form.Get("externalPort"))
+				intPort, _ := strconv.Atoi(r.Form.Get("internalPort"))
+				extEndPort, _ := strconv.Atoi(r.Form.Get("externalEndPort"))
+
+				newRule := PortForward{
+					ID:              60,
+					Enabled:         enabled,
+					Description:     description,
+					ExternalIP:      "",
+					ExternalPort:    extPort,
+					ExternalEndPort: extEndPort,
+					InternalPort:    intPort,
+					InternalIP:      ip,
+					Service:         "OTHER",
+					Protocol:        protocol,
+				}
+				rules = append(rules, newRule)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		case "PUT":
+			if r.URL.Path == "/api/v1/nat/rules/60" {
+				_ = r.ParseForm()
+				for idx, val := range rules {
+					if val.ID == 60 {
+						if r.Form.Get("enable") != "" {
+							rules[idx].Enabled = r.Form.Get("enable") == "1"
+						}
+						if r.Form.Get("description") != "" {
+							rules[idx].Description = r.Form.Get("description")
+						}
+						if r.Form.Get("protocol") != "" {
+							rules[idx].Protocol = r.Form.Get("protocol")
+						}
+						if r.Form.Get("ipaddress") != "" {
+							rules[idx].InternalIP = r.Form.Get("ipaddress")
+						}
+						if r.Form.Get("externalPort") != "" {
+							rules[idx].ExternalPort, _ = strconv.Atoi(r.Form.Get("externalPort"))
+						}
+						if r.Form.Get("internalPort") != "" {
+							rules[idx].InternalPort, _ = strconv.Atoi(r.Form.Get("internalPort"))
+						}
+						if r.Form.Get("externalEndPort") != "" {
+							rules[idx].ExternalEndPort, _ = strconv.Atoi(r.Form.Get("externalEndPort"))
+						}
+					}
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		case "DELETE":
+			if r.URL.Path == "/api/v1/nat/rules/60" {
+				var updated []PortForward
+				for _, rl := range rules {
+					if rl.ID != 60 {
+						updated = append(updated, rl)
+					}
+				}
+				rules = updated
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	c, err := NewClient(server.URL, "admin", "some_secure_password")
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Get Port Forwards
+	list, err := c.GetPortForwards(ctx)
+	if err != nil {
+		t.Fatalf("GetPortForwards failed: %v", err)
+	}
+	if len(list) != 1 || list[0].Description != "bastion 2222" {
+		t.Errorf("Unexpected rules list: %+v", list)
+	}
+
+	// 2. Add Port Forward
+	newRl, err := c.AddPortForward(ctx, "ssh-server", "198.51.100.2", "", 2223, 2222, 0, "tcp", true)
+	if err != nil {
+		t.Fatalf("AddPortForward failed: %v", err)
+	}
+	if newRl.ID != 60 || newRl.Description != "ssh-server" {
+		t.Errorf("Unexpected created rule: %+v", newRl)
+	}
+
+	// Verify it was added
+	list, err = c.GetPortForwards(ctx)
+	if err != nil {
+		t.Fatalf("GetPortForwards failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Errorf("Expected 2 rules, got %d", len(list))
+	}
+
+	// Update Port Forward
+	err = c.UpdatePortForward(ctx, 60, "updated-ssh", "198.51.100.3", "", 2224, 22, 0, "udp", false)
+	if err != nil {
+		t.Fatalf("UpdatePortForward failed: %v", err)
+	}
+
+	// Verify update was applied
+	list, err = c.GetPortForwards(ctx)
+	if err != nil {
+		t.Fatalf("GetPortForwards failed: %v", err)
+	}
+	for _, rl := range list {
+		if rl.ID == 60 {
+			if rl.Description != "updated-ssh" || rl.InternalIP != "198.51.100.3" || rl.ExternalPort != 2224 || rl.Enabled != false {
+				t.Errorf("Unexpected updated rule fields: %+v", rl)
+			}
+		}
+	}
+
+	// 3. Delete Port Forward
+	err = c.DeletePortForward(ctx, 60)
+	if err != nil {
+		t.Fatalf("DeletePortForward failed: %v", err)
+	}
+
+	// Verify it was removed
+	list, err = c.GetPortForwards(ctx)
+	if err != nil {
+		t.Fatalf("GetPortForwards failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("Expected 1 rule after deletion, got %d", len(list))
 	}
 }
