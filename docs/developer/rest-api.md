@@ -246,4 +246,126 @@ All requests are served over HTTP.
 * **Description**: Deletes a port forwarding rule by its assigned ID.
 * **Response Status**: `204 No Content`
 
+---
+
+## DHCP Server & DNS Settings
+
+### 1. GET `/api/v1/dhcp`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Retrieves the current DHCP server configuration.
+* **Response Body (JSON)**:
+  ```json
+  [
+    {
+      "hostname": "mygateway",
+      "dhcp": {
+        "state": "ENABLED",
+        "enable": true,
+        "minaddress": "192.168.1.5",
+        "maxaddress": "192.168.1.250",
+        "leasetime": 43200,
+        "iprouter": "192.168.1.1",
+        "subnetmask": "255.255.255.0"
+      },
+      "reservedpools": {
+        "list": []
+      }
+    }
+  ]
+  ```
+
+### 2. PUT `/api/v1/dhcp`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Updates the DHCP server configuration.
+* **Request Body** (`application/x-www-form-urlencoded`):
+  ```
+  enable=1&minaddress=192.168.1.10&maxaddress=192.168.1.250&leasetime=43200
+  ```
+  * `enable`: `1` (enabled) or `0` (disabled).
+  * `minaddress`: Starting IP address of the DHCP pool.
+  * `maxaddress`: Ending IP address of the DHCP pool.
+  * `leasetime`: DHCP lease time in seconds.
+* **Response Status**: `204 No Content`
+
+### 3. GET `/api/v1/dns/ipv4`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Retrieves current DNS IPv4 advertisement settings.
+* **Request Parameters**:
+  * `interface` (Query string, typically `LAN`)
+* **Response Body (JSON)**:
+  ```json
+  [
+    {
+      "DNS": {
+        "interface": "LAN",
+        "dnsMode": "STATIC",
+        "static": {
+          "providerList": "Custom",
+          "provider": "Custom",
+          "servers": "198.51.100.1,198.51.100.2"
+        },
+        "dynamic": [
+          {
+            "server": "198.51.100.1,198.51.100.2"
+          }
+        ]
+      },
+      "providersList": []
+    }
+  ]
+  ```
+
+### 4. PUT `/api/v1/dns/ipv4`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Configures DNS IPv4 advertisement mode.
+* **Request Body** (`application/x-www-form-urlencoded`):
+  ```
+  interface=LAN&enableStatic=1&servers=198.51.100.1%2C198.51.100.2
+  ```
+  * `interface`: Must be `LAN`.
+  * `enableStatic`: `1` (use user-specified static DNS servers) or `0` (use ISP-provided DNS servers).
+  * `servers`: Comma-separated list of IPv4 DNS servers. Empty when `enableStatic=0`.
+* **Response Status**: `204 No Content`
+
+### 5. GET `/api/v1/dns/ipv6`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Retrieves current DNS IPv6 advertisement settings.
+* **Request Parameters**:
+  * `interface` (Query string, typically `LAN`)
+* **Response Body (JSON)**:
+  ```json
+  [
+    {
+      "DNS": {
+        "interface": "",
+        "dnsMode": "STATIC",
+        "static": {
+          "providerList": "",
+          "provider": "Custom",
+          "servers": "2001:db8:1::2,2001:db8:1::3"
+        },
+        "dynamic": [
+          {
+            "server": "fe80::0200:00ff:fe00:0003"
+          }
+        ]
+      },
+      "providersList": []
+    }
+  ]
+  ```
+
+### 6. PUT `/api/v1/dns/ipv6`
+* **Authentication**: Required (`conid` session cookie)
+* **Description**: Configures DNS IPv6 advertisement mode.
+* **Request Body** (`application/x-www-form-urlencoded`):
+  ```
+  interface=LAN&enableStatic=1&servers=2001%3Adb8%3A1%3A%3A2%3A%3A16%3A5%2C2001%3Adb8%3A1%3A%3A2%3A%3A16%3A6
+  ```
+  * `interface`: Must be `LAN`.
+  * `enableStatic`: `1` (use user-specified static DNS servers) or `0` (use ISP-provided DNS servers).
+  * `servers`: Comma-separated list of IPv6 DNS servers. Empty when `enableStatic=0`.
+* **Response Status**: `204 No Content`
+
+
 

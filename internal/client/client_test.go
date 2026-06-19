@@ -462,3 +462,206 @@ func TestNATOperations(t *testing.T) {
 		t.Errorf("Expected 1 rule after deletion, got %d", len(list))
 	}
 }
+
+func TestDHCPServerAndDNSOperations(t *testing.T) {
+	dhcpSettings := DHCPServer{
+		Enable:     true,
+		MinAddress: "192.168.1.5",
+		MaxAddress: "192.168.1.250",
+		LeaseTime:  43200,
+		IPRouter:   "192.168.1.1",
+		SubnetMask: "255.255.255.0",
+	}
+
+	dnsIPv4Settings := DNSData{
+		Interface: "LAN",
+		DNSMode:   "STATIC",
+		Static: DNSStatic{
+			ProviderList: "Custom",
+			Provider:     "Custom",
+			Servers:      "198.51.100.1,198.51.100.2",
+		},
+		Dynamic: []DNSDynamic{
+			{Server: "198.51.100.1,198.51.100.2"},
+		},
+	}
+
+	dnsIPv6Settings := DNSData{
+		Interface: "",
+		DNSMode:   "STATIC",
+		Static: DNSStatic{
+			ProviderList: "",
+			Provider:     "Custom",
+			Servers:      "2001:db8:1::2::16:5,2001:db8:1::2::16:6",
+		},
+		Dynamic: []DNSDynamic{
+			{Server: "fe80::0200:00ff:fe00:0003"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			if r.URL.Path == "/api/v1/dhcp" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				wrapper := []DHCPServerWrapper{
+					{
+						Hostname: "mygateway",
+						DHCP:     dhcpSettings,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(wrapper)
+				return
+			}
+			if r.URL.Path == "/api/v1/dns/ipv4" {
+				if r.URL.Query().Get("interface") != "LAN" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				wrapper := []DNSWrapper{
+					{
+						DNS: dnsIPv4Settings,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(wrapper)
+				return
+			}
+			if r.URL.Path == "/api/v1/dns/ipv6" {
+				if r.URL.Query().Get("interface") != "LAN" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				wrapper := []DNSWrapper{
+					{
+						DNS: dnsIPv6Settings,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(wrapper)
+				return
+			}
+		case "PUT":
+			if r.URL.Path == "/api/v1/dhcp" {
+				_ = r.ParseForm()
+				dhcpSettings.Enable = r.Form.Get("enable") == "1"
+				dhcpSettings.MinAddress = r.Form.Get("minaddress")
+				dhcpSettings.MaxAddress = r.Form.Get("maxaddress")
+				leaseVal, _ := strconv.Atoi(r.Form.Get("leasetime"))
+				dhcpSettings.LeaseTime = leaseVal
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.URL.Path == "/api/v1/dns/ipv4" {
+				_ = r.ParseForm()
+				if r.Form.Get("interface") != "LAN" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				enableStatic := r.Form.Get("enableStatic") == "1"
+				if enableStatic {
+					dnsIPv4Settings.DNSMode = "STATIC"
+				} else {
+					dnsIPv4Settings.DNSMode = "DYNAMIC"
+				}
+				dnsIPv4Settings.Static.Servers = r.Form.Get("servers")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.URL.Path == "/api/v1/dns/ipv6" {
+				_ = r.ParseForm()
+				if r.Form.Get("interface") != "LAN" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				enableStatic := r.Form.Get("enableStatic") == "1"
+				if enableStatic {
+					dnsIPv6Settings.DNSMode = "STATIC"
+				} else {
+					dnsIPv6Settings.DNSMode = "DYNAMIC"
+				}
+				dnsIPv6Settings.Static.Servers = r.Form.Get("servers")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	c, err := NewClient(server.URL, "admin", "some_secure_password")
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Test DHCP server GET & PUT
+	dhcp, err := c.GetDHCPServer(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPServer failed: %v", err)
+	}
+	if !dhcp.Enable || dhcp.MinAddress != "192.168.1.5" || dhcp.MaxAddress != "192.168.1.250" || dhcp.LeaseTime != 43200 {
+		t.Errorf("Unexpected DHCP server settings: %+v", dhcp)
+	}
+
+	err = c.UpdateDHCPServer(ctx, false, "192.168.1.10", "192.168.1.200", 86400)
+	if err != nil {
+		t.Fatalf("UpdateDHCPServer failed: %v", err)
+	}
+
+	dhcp, err = c.GetDHCPServer(ctx)
+	if err != nil {
+		t.Fatalf("GetDHCPServer failed: %v", err)
+	}
+	if dhcp.Enable || dhcp.MinAddress != "192.168.1.10" || dhcp.MaxAddress != "192.168.1.200" || dhcp.LeaseTime != 86400 {
+		t.Errorf("Unexpected updated DHCP server settings: %+v", dhcp)
+	}
+
+	// Test DNS IPv4 GET & PUT
+	dns4, err := c.GetDNSIPv4(ctx)
+	if err != nil {
+		t.Fatalf("GetDNSIPv4 failed: %v", err)
+	}
+	if dns4.DNSMode != "STATIC" || dns4.Static.Servers != "198.51.100.1,198.51.100.2" {
+		t.Errorf("Unexpected DNS IPv4 settings: %+v", dns4)
+	}
+
+	err = c.UpdateDNSIPv4(ctx, false, "")
+	if err != nil {
+		t.Fatalf("UpdateDNSIPv4 failed: %v", err)
+	}
+
+	dns4, err = c.GetDNSIPv4(ctx)
+	if err != nil {
+		t.Fatalf("GetDNSIPv4 failed: %v", err)
+	}
+	if dns4.DNSMode != "DYNAMIC" || dns4.Static.Servers != "" {
+		t.Errorf("Unexpected updated DNS IPv4 settings: %+v", dns4)
+	}
+
+	// Test DNS IPv6 GET & PUT
+	dns6, err := c.GetDNSIPv6(ctx)
+	if err != nil {
+		t.Fatalf("GetDNSIPv6 failed: %v", err)
+	}
+	if dns6.DNSMode != "STATIC" || dns6.Static.Servers != "2001:db8:1::2::16:5,2001:db8:1::2::16:6" {
+		t.Errorf("Unexpected DNS IPv6 settings: %+v", dns6)
+	}
+
+	err = c.UpdateDNSIPv6(ctx, true, "2001:db8:1::4::16:5,2001:db8:1::4::16:6")
+	if err != nil {
+		t.Fatalf("UpdateDNSIPv6 failed: %v", err)
+	}
+
+	dns6, err = c.GetDNSIPv6(ctx)
+	if err != nil {
+		t.Fatalf("GetDNSIPv6 failed: %v", err)
+	}
+	if dns6.DNSMode != "STATIC" || dns6.Static.Servers != "2001:db8:1::4::16:5,2001:db8:1::4::16:6" {
+		t.Errorf("Unexpected updated DNS IPv6 settings: %+v", dns6)
+	}
+}

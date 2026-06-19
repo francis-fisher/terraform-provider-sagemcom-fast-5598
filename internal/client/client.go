@@ -451,6 +451,157 @@ func (c *Client) UpdateDHCPReservedAddress(
 	return nil
 }
 
+// DHCPServer represents the DHCP server configuration.
+type DHCPServer struct {
+	Enable     bool   `json:"enable"`
+	MinAddress string `json:"minaddress"`
+	MaxAddress string `json:"maxaddress"`
+	LeaseTime  int    `json:"leasetime"`
+	IPRouter   string `json:"iprouter"`
+	SubnetMask string `json:"subnetmask"`
+}
+
+type DHCPServerWrapper struct {
+	Hostname string     `json:"hostname"`
+	DHCP     DHCPServer `json:"dhcp"`
+}
+
+// GetDHCPServer retrieves the DHCP server settings.
+func (c *Client) GetDHCPServer(ctx context.Context) (*DHCPServer, error) {
+	body, err := c.AuthenticatedGet(ctx, "/api/v1/dhcp")
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []DHCPServerWrapper
+	if err := json.Unmarshal(body, &wrappers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal DHCP server settings: %w", err)
+	}
+
+	if len(wrappers) > 0 {
+		return &wrappers[0].DHCP, nil
+	}
+
+	return nil, fmt.Errorf("no DHCP server settings returned from API")
+}
+
+// UpdateDHCPServer updates the DHCP server settings.
+func (c *Client) UpdateDHCPServer(ctx context.Context, enabled bool, minAddress string, maxAddress string, leaseTime int) error {
+	form := url.Values{}
+	enableVal := "0"
+	if enabled {
+		enableVal = "1"
+	}
+	form.Set("enable", enableVal)
+	form.Set("minaddress", minAddress)
+	form.Set("maxaddress", maxAddress)
+	form.Set("leasetime", fmt.Sprintf("%d", leaseTime))
+
+	_, err := c.AuthenticatedPut(ctx, "/api/v1/dhcp", form)
+	if err != nil {
+		return fmt.Errorf("failed to update DHCP server settings: %w", err)
+	}
+	return nil
+}
+
+// DNSStatic represents static DNS configuration.
+type DNSStatic struct {
+	ProviderList string `json:"providerList"`
+	Provider     string `json:"provider"`
+	Servers      string `json:"servers"`
+}
+
+// DNSDynamic represents dynamic DNS servers from ISP.
+type DNSDynamic struct {
+	Server string `json:"server"`
+}
+
+// DNSData represents the DNS configuration object.
+type DNSData struct {
+	Interface string       `json:"interface"`
+	DNSMode   string       `json:"dnsMode"`
+	Static    DNSStatic    `json:"static"`
+	Dynamic   []DNSDynamic `json:"dynamic"`
+}
+
+type DNSWrapper struct {
+	DNS DNSData `json:"DNS"`
+}
+
+// GetDNSIPv4 retrieves IPv4 DNS settings.
+func (c *Client) GetDNSIPv4(ctx context.Context) (*DNSData, error) {
+	body, err := c.AuthenticatedGet(ctx, "/api/v1/dns/ipv4?interface=LAN")
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []DNSWrapper
+	if err := json.Unmarshal(body, &wrappers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal DNS IPv4: %w", err)
+	}
+
+	if len(wrappers) > 0 {
+		return &wrappers[0].DNS, nil
+	}
+
+	return nil, fmt.Errorf("no DNS IPv4 settings returned from API")
+}
+
+// UpdateDNSIPv4 updates IPv4 DNS settings.
+func (c *Client) UpdateDNSIPv4(ctx context.Context, enableStatic bool, servers string) error {
+	form := url.Values{}
+	form.Set("interface", "LAN")
+	enableStaticVal := "0"
+	if enableStatic {
+		enableStaticVal = "1"
+	}
+	form.Set("enableStatic", enableStaticVal)
+	form.Set("servers", servers)
+
+	_, err := c.AuthenticatedPut(ctx, "/api/v1/dns/ipv4", form)
+	if err != nil {
+		return fmt.Errorf("failed to update DNS IPv4 settings: %w", err)
+	}
+	return nil
+}
+
+// GetDNSIPv6 retrieves IPv6 DNS settings.
+func (c *Client) GetDNSIPv6(ctx context.Context) (*DNSData, error) {
+	body, err := c.AuthenticatedGet(ctx, "/api/v1/dns/ipv6?interface=LAN")
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []DNSWrapper
+	if err := json.Unmarshal(body, &wrappers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal DNS IPv6: %w", err)
+	}
+
+	if len(wrappers) > 0 {
+		return &wrappers[0].DNS, nil
+	}
+
+	return nil, fmt.Errorf("no DNS IPv6 settings returned from API")
+}
+
+// UpdateDNSIPv6 updates IPv6 DNS settings.
+func (c *Client) UpdateDNSIPv6(ctx context.Context, enableStatic bool, servers string) error {
+	form := url.Values{}
+	form.Set("interface", "LAN")
+	enableStaticVal := "0"
+	if enableStatic {
+		enableStaticVal = "1"
+	}
+	form.Set("enableStatic", enableStaticVal)
+	form.Set("servers", servers)
+
+	_, err := c.AuthenticatedPut(ctx, "/api/v1/dns/ipv6", form)
+	if err != nil {
+		return fmt.Errorf("failed to update DNS IPv6 settings: %w", err)
+	}
+	return nil
+}
+
 // PortForward represents a port forwarding / NAT rule on the router.
 type PortForward struct {
 	ID              int    `json:"id"`
