@@ -13,6 +13,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GehirnInc/crypt"
@@ -32,6 +33,12 @@ type Client struct {
 	SerialNumber            string
 	ProductClass            string
 	GatewayIP               string
+
+	// dhcpMutex serialises access to DHCP static leases write endpoints
+	// it seems quite easy for the router to end up in a state where it
+	// returns 400 when trying to add, change or delete reserved
+	// addresses.
+	dhcpMutex sync.Mutex
 }
 
 // OpenResponse represents the metadata structure returned by /api/v1/open.
@@ -371,6 +378,9 @@ func (c *Client) GetDHCPReservedAddresses(ctx context.Context) ([]DHCPClient, er
 // AddDHCPReservedAddress creates a new DHCP reservation on the router.
 // Returns the newly created DHCPClient with its assigned ID.
 func (c *Client) AddDHCPReservedAddress(ctx context.Context, hostname, macaddress, ipaddress string, enabled bool) (*DHCPClient, error) {
+	c.dhcpMutex.Lock()
+	defer c.dhcpMutex.Unlock()
+
 	form := url.Values{}
 	enableVal := "0"
 	if enabled {
@@ -406,6 +416,9 @@ func (c *Client) AddDHCPReservedAddress(ctx context.Context, hostname, macaddres
 
 // DeleteDHCPReservedAddress deletes a DHCP reservation by ID.
 func (c *Client) DeleteDHCPReservedAddress(ctx context.Context, id int) error {
+	c.dhcpMutex.Lock()
+	defer c.dhcpMutex.Unlock()
+
 	path := fmt.Sprintf("/api/v1/dhcp/clients/%d", id)
 	_, err := c.AuthenticatedDelete(ctx, path)
 	if err != nil {
@@ -425,6 +438,9 @@ func (c *Client) UpdateDHCPReservedAddress(
 	ipaddress *string,
 	enabled *bool,
 ) error {
+	c.dhcpMutex.Lock()
+	defer c.dhcpMutex.Unlock()
+
 	form := url.Values{}
 	if enabled != nil {
 		enableVal := "0"

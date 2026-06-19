@@ -32,8 +32,8 @@ resource "sagemcom_dhcp" "example" {
 
 ### Required
 
-- `max_address` (String) The ending IP address in the DHCP pool.
-- `min_address` (String) The starting IP address in the DHCP pool.
+- `max_address` (String) The highest IP address in the DHCP pool.
+- `min_address` (String) The lowest IP address in the DHCP pool.
 
 ### Optional
 
